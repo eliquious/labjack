@@ -7,6 +7,7 @@ import (
 	"github.com/google/gousb"
 	"log"
 	"testing"
+	"time"
 )
 
 func Example_Open() {
@@ -115,5 +116,55 @@ func Test_StreamConfig(t *testing.T) {
 	_, err = dev.NewStream(u6.StreamConfig{1, 25, 0, u6.ScanConfig{u6.ClockSpeed4Mhz, u6.ClockDivisionOff}, []u6.ChannelConfig{{1, u6.GainIndex1, u6.DifferentialInputDisabled}}})
 	if err != nil {
 		log.Fatal(err)
+	}
+}
+
+func Test_StreamData(t *testing.T) {
+
+	// Initialize a new Context.
+	ctx := gousb.NewContext()
+	defer ctx.Close()
+	ctx.Debug(1)
+
+	// Open U6 connection
+	dev, err := u6.OpenUSBConnection(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer dev.Close()
+
+	fmt.Println(dev.DeviceDesc())
+
+	stream, err := dev.NewStream(u6.StreamConfig{1, 25, 0, u6.ScanConfig{u6.ClockSpeed4Mhz, u6.ClockDivisionOff}, []u6.ChannelConfig{{12, u6.GainIndex10, u6.DifferentialInputDisabled}}})
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	ch, err := stream.Start()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	timeout := time.After(time.Second * 10)
+OUTER:
+	for {
+		select {
+		case resp := <-ch:
+			fmt.Println("Packet: ", resp.PacketNumber)
+			for _, channel := range resp.Data {
+				voltage, err := channel.GetCalibratedAIN()
+				if err != nil {
+					fmt.Println(err)
+					continue
+				}
+				fmt.Printf("\tChannelIndex=%d;\n\tScanNumber=%d;\n\tVoltage=%0.6f\n", channel.ChannelIndex, channel.ScanNumber, voltage)
+			}
+
+			// fmt.Println(time.Now(), voltage)
+		case <-timeout:
+			stream.Stop()
+			ch = nil
+			break OUTER
+		}
 	}
 }

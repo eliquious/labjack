@@ -20,6 +20,9 @@ var ErrInvalidChecksumInput = errors.New("Checksum could not be calculated; inpu
 // ErrInvalidChecksumResponse is returned if the U6 detected a bad checksum
 var ErrInvalidChecksumResponse = errors.New("The U6 detected a bad checksum. Double check your checksum calculations and try again")
 
+// ErrInvalidChecksum8Response is returned if the checksum8 function provides invalid data.
+var ErrInvalidChecksum8Response = errors.New("The U6 detected a bad checksum. Double check your checksum8 calculations and try again")
+
 // ErrInvalidChecksum is returned if the checksum is invalid
 var ErrInvalidChecksum = errors.New("Invalid checksum")
 

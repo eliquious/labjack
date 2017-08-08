@@ -20,6 +20,12 @@ func OpenUSBConnection(usbctx *gousb.Context) (U6, error) {
 	if err != nil {
 		return emptyU6, ErrLibUSB{"Could not open a device", err}
 	}
+	if err := dev.Reset(); err != nil {
+		return emptyU6, err
+	}
+	if err := dev.SetAutoDetach(true); err != nil {
+		return emptyU6, err
+	}
 
 	ljdev := U6{dev, DeviceDesc{}, DefaultCalibrationInfo}
 	if err = ljdev.initConnection(); err != nil {
@@ -382,7 +388,7 @@ func (u *U6) Feedback(cmds ...FeedbackCommand) error {
 	} else if c8 != recvBuffer[0] {
 		return ErrInvalidResponseHeader
 	}
-	fmt.Println("Recv Buffer: ", recvBuffer)
+	// fmt.Println("Recv Buffer: ", recvBuffer)
 
 	errCode := recvBuffer[6]
 	errFrame := recvBuffer[7]
@@ -410,7 +416,7 @@ func (u *U6) Feedback(cmds ...FeedbackCommand) error {
 
 // NewStream creates a new data stream
 func (u *U6) NewStream(config StreamConfig) (*Stream, error) {
-	stream := &Stream{u, config}
+	stream := &Stream{u, config, make(chan struct{}), func() {}}
 	if config.SamplesPerPacket < 1 || config.SamplesPerPacket > 25 {
 		return stream, errors.New("Invalid samples per packet")
 	} else if config.ResolutionIndex < 1 || config.ResolutionIndex > 8 {
@@ -444,7 +450,7 @@ func (u *U6) NewStream(config StreamConfig) (*Stream, error) {
 	if err := setChecksum(header); err != nil {
 		return stream, err
 	}
-	fmt.Printf("After checksum: %v\n", header)
+	// fmt.Printf("After checksum: %v\n", header)
 
 	// Open USB interface
 	inf, done, err := u.device.DefaultInterface()
@@ -502,7 +508,7 @@ func (u *U6) NewStream(config StreamConfig) (*Stream, error) {
 	} else if c8 != recvBuffer[0] {
 		return stream, ErrInvalidResponseHeader
 	}
-	fmt.Println("Recv Buffer: ", recvBuffer)
+	// fmt.Println("Recv Buffer: ", recvBuffer)
 
 	errCode := recvBuffer[6]
 	if errCode != 0 {

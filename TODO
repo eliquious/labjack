@@ -1,0 +1,11 @@
+
+Feedback commands:
+	+ BitStateRead
+	+ BitStateWrite
+Streaming
+
+New DAQ
+	LabJack + Serials
+	Different files for each data source
+	In memory database for quick searches
+	React / Redux UI for plots
