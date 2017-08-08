@@ -407,3 +407,106 @@ func (u *U6) Feedback(cmds ...FeedbackCommand) error {
 	}
 	return nil
 }
+
+// NewStream creates a new data stream
+func (u *U6) NewStream(config StreamConfig) (*Stream, error) {
+	stream := &Stream{u, config}
+	if config.SamplesPerPacket < 1 || config.SamplesPerPacket > 25 {
+		return stream, errors.New("Invalid samples per packet")
+	} else if config.ResolutionIndex < 1 || config.ResolutionIndex > 8 {
+		return stream, errors.New("Invalid resolution index")
+	}
+
+	header := make([]byte, 14+2*len(config.Channels))
+	header[1] = 0xF8
+	header[2] = byte(len(config.Channels) + 4)
+	header[3] = 0x11
+	header[6] = byte(len(config.Channels))
+	header[7] = byte(config.ResolutionIndex)
+	header[8] = byte(config.SamplesPerPacket)
+	header[10] = byte(config.SettlingFactor)
+	header[11] = config.ScanConfig.GetByte()
+
+	scanInterval := 4000
+	if config.ScanConfig.ClockSpeed == ClockSpeed48Mhz {
+		scanInterval = 48000
+	}
+	header[12] = byte(scanInterval & 0x00FF)
+	header[13] = byte(scanInterval / 256)
+
+	for i, ch := range config.Channels {
+		header[14+i*2] = ch.PositiveChannel
+		header[15+i*2] = byte(ch.Differential) + byte(ch.GainIndex)<<4
+	}
+	// fmt.Println("After header: ", sendBuffer.Bytes())
+
+	// Calculate checksum
+	if err := setChecksum(header); err != nil {
+		return stream, err
+	}
+	fmt.Printf("After checksum: %v\n", header)
+
+	// Open USB interface
+	inf, done, err := u.device.DefaultInterface()
+	if err != nil {
+		return stream, err
+	}
+	defer done()
+
+	// Open endpoint
+	out, err := inf.OutEndpoint(labjack.U6PipeOutEP1)
+	if err != nil {
+		return stream, err
+	}
+
+	// Transmit send buffer
+	n, err := out.Write(header)
+	if err != nil {
+		return stream, err
+	} else if n != len(header) {
+		return stream, errors.New("Send buffer was not written completely")
+	}
+
+	// Open endpoint
+	in, err := inf.InEndpoint(labjack.U6PipeInEP2)
+	if err != nil {
+		return stream, err
+	}
+
+	// Read response
+	recvBuffer := make([]byte, 8)
+	n, err = in.Read(recvBuffer)
+	if err != nil {
+		return stream, err
+	} else if n != len(recvBuffer) {
+		// fmt.Printf("Recv buffer: %v\n", recvBuffer)
+		return stream, fmt.Errorf("Full response was not recieved from device: %d != %d", n, len(recvBuffer))
+	}
+
+	checksumTotal, err := extendedChecksum16(recvBuffer)
+	if err != nil {
+		return stream, err
+	} else if byte((checksumTotal/256)&0xFF) != recvBuffer[5] {
+		return stream, ErrInvalidChecksumResponse
+	} else if byte(checksumTotal&0xFF) != recvBuffer[4] {
+		return stream, ErrInvalidChecksumResponse
+	} else if recvBuffer[1] != 0xF8 || recvBuffer[3] != 0x11 {
+		return stream, ErrInvalidResponseHeader
+	} else if recvBuffer[7] != 0x00 {
+		return stream, ErrInvalidResponseHeader
+	}
+
+	c8, err := extendedChecksum8(recvBuffer)
+	if err != nil {
+		return stream, err
+	} else if c8 != recvBuffer[0] {
+		return stream, ErrInvalidResponseHeader
+	}
+	fmt.Println("Recv Buffer: ", recvBuffer)
+
+	errCode := recvBuffer[6]
+	if errCode != 0 {
+		return stream, fmt.Errorf("Feedback response error code (%d)", errCode)
+	}
+	return stream, nil
+}

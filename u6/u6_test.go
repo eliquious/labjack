@@ -96,3 +96,24 @@ func Test_BitStateRead(t *testing.T) {
 	fmt.Printf("FIO6: %v\n", fio6.GetState())
 	fmt.Printf("FIO7: %v\n", fio7.GetState())
 }
+
+func Test_StreamConfig(t *testing.T) {
+
+	// Initialize a new Context.
+	ctx := gousb.NewContext()
+	defer ctx.Close()
+
+	// Open U6 connection
+	dev, err := u6.OpenUSBConnection(ctx)
+	if err != nil {
+		log.Fatal(err)
+	}
+	defer dev.Close()
+
+	fmt.Println(dev.DeviceDesc())
+
+	_, err = dev.NewStream(u6.StreamConfig{1, 25, 0, u6.ScanConfig{u6.ClockSpeed4Mhz, u6.ClockDivisionOff}, []u6.ChannelConfig{{1, u6.GainIndex1, u6.DifferentialInputDisabled}}})
+	if err != nil {
+		log.Fatal(err)
+	}
+}
