@@ -60,6 +60,22 @@ func TestSetChecksum1(t *testing.T) {
 	}
 }
 
+func TestSetChecksum2(t *testing.T) {
+	command := []byte{0, 248, 5, 17, 0, 0, 1, 1, 25, 0, 1, 0, 32, 3, 193, 0}
+	err := setChecksum(command)
+	if err != nil {
+		t.Fatalf("Checksum error")
+	}
+	t.Logf("After: %v", command)
+
+	ans := []byte{16, 248, 5, 17, 0, 1, 1, 1, 25, 0, 1, 0, 32, 3, 193, 0}
+	for i := 0; i < len(command); i++ {
+		if command[i] != ans[i] {
+			t.Fatalf("Checksums do not match: %v != %v", command, ans)
+		}
+	}
+}
+
 func TestUint8ArrayToFloat64(t *testing.T) {
 	data := []byte{0, 0, 148, 38, 54, 131, 0, 0}
 	if uint8ArrayToFloat64(data, 0) != 33590.15069580078 {

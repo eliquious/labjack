@@ -415,12 +415,32 @@ func (u *U6) Feedback(cmds ...FeedbackCommand) error {
 }
 
 // NewStream creates a new data stream
-func (u *U6) NewStream(config StreamConfig) (*Stream, error) {
+func (u *U6) NewStream(config *StreamConfig) (*Stream, error) {
 	stream := &Stream{u, config, make(chan struct{}), func() {}}
 	if config.SamplesPerPacket < 1 || config.SamplesPerPacket > 25 {
 		return stream, errors.New("Invalid samples per packet")
 	} else if config.ResolutionIndex < 1 || config.ResolutionIndex > 8 {
 		return stream, errors.New("Invalid resolution index")
+	}
+
+	// config.ScanFrequency *= len(config.Channels)
+	if config.ScanFrequency != 0 {
+		if config.ScanFrequency < 1000 {
+			if config.ScanFrequency < 25 {
+				config.SamplesPerPacket = byte(config.ScanFrequency)
+			}
+			config.ScanConfig.DivideBy256 = ClockDivisionOn
+			config.ScanConfig.ScanInterval = uint16(15625 / config.ScanFrequency)
+		} else {
+			config.ScanConfig.DivideBy256 = ClockDivisionOff
+			config.ScanConfig.ScanInterval = uint16(4000000 / config.ScanFrequency)
+		}
+	}
+
+	if config.SamplesPerPacket > 25 {
+		config.SamplesPerPacket = 25
+	} else if config.SamplesPerPacket < 1 {
+		config.SamplesPerPacket = 1
 	}
 
 	header := make([]byte, 14+2*len(config.Channels))
@@ -433,12 +453,12 @@ func (u *U6) NewStream(config StreamConfig) (*Stream, error) {
 	header[10] = byte(config.SettlingFactor)
 	header[11] = config.ScanConfig.GetByte()
 
-	scanInterval := 4000
-	if config.ScanConfig.ClockSpeed == ClockSpeed48Mhz {
-		scanInterval = 48000
-	}
-	header[12] = byte(scanInterval & 0x00FF)
-	header[13] = byte(scanInterval / 256)
+	// // scanInterval := 4000
+	// if config.ScanConfig.ClockSpeed == ClockSpeed48Mhz {
+	// 	// scanInterval = 48000
+	// }
+	header[12] = byte(config.ScanConfig.ScanInterval & 0x00FF)
+	header[13] = byte(config.ScanConfig.ScanInterval / 256)
 
 	for i, ch := range config.Channels {
 		header[14+i*2] = ch.PositiveChannel

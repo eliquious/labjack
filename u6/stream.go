@@ -14,7 +14,8 @@ type StreamConfig struct {
 	ResolutionIndex  byte
 	SamplesPerPacket byte
 	SettlingFactor   byte
-	ScanConfig       ScanConfig
+	ScanFrequency    int
+	ScanConfig       *ScanConfig
 	Channels         []ChannelConfig
 }
 
@@ -25,8 +26,9 @@ type ChannelConfig struct {
 }
 
 type ScanConfig struct {
-	ClockSpeed  ClockSpeed
-	DivideBy256 ClockDivision
+	ClockSpeed   ClockSpeed
+	DivideBy256  ClockDivision
+	ScanInterval uint16
 }
 
 func (s ScanConfig) GetByte() byte {
@@ -65,7 +67,7 @@ const (
 
 type StreamResponse struct {
 	Timestamp    time.Time
-	Data         []ChannelData
+	Data         []*ChannelData
 	PacketNumber int
 	ErrorCode    byte
 	Error        error
@@ -80,7 +82,7 @@ type ChannelData struct {
 	ChannelIndex  int
 	ScanNumber    int
 	PacketNumber  int
-	config        StreamConfig
+	config        *StreamConfig
 	calInfo       CalibrationInfo
 	channelConfig ChannelConfig
 }
@@ -89,9 +91,17 @@ func (c *ChannelData) GetCalibratedAIN() (float64, error) {
 	return getCalibratedAIN(c.calInfo, int(c.config.ResolutionIndex), int(c.channelConfig.GainIndex), false, uint(c.Raw))
 }
 
+func (c *ChannelData) FIO(pin int) int {
+	return int((c.Raw & (1 << uint(pin))) >> uint(pin))
+}
+
+func (c *ChannelData) EIO(pin int) int {
+	return int(((c.Raw >> 8) & (1 << uint(pin))) >> uint(pin))
+}
+
 type Stream struct {
 	device   *U6
-	config   StreamConfig
+	config   *StreamConfig
 	stopCh   chan struct{}
 	closeInf func()
 }
@@ -129,14 +139,14 @@ func (s *Stream) Start() (chan StreamResponse, error) {
 	}
 	// in.Timeout = time.Second
 
-	stream, err := in.NewStream(int(14*s.config.SamplesPerPacket*2), 20)
+	stream, err := in.NewStream(int(14*s.config.SamplesPerPacket*2)*10, 20)
 	if err != nil {
 		done()
 		return dataCh, err
 	}
 	s.closeInf = done
 
-	fmt.Println("Reading stream")
+	// fmt.Println("Reading stream")
 	go s.readStream(dataCh, stream)
 	return dataCh, nil
 }
@@ -155,7 +165,11 @@ func (s *Stream) readStream(dataCh chan StreamResponse, stream *gousb.ReadStream
 	samplesPerPacket := s.config.SamplesPerPacket
 	bytelimit := int(12 + s.config.SamplesPerPacket*2)
 	numChannels := len(s.config.Channels)
-	recvBuffer := make([]byte, 14+s.config.SamplesPerPacket*2)
+	packetsPerRequest := 10
+
+	var recvBuffer []byte
+	packestSize := int(14 + s.config.SamplesPerPacket*2)
+	reqBuffer := make([]byte, packestSize*packetsPerRequest)
 	// bufferedReader := bufio.NewReader(stream)
 	for {
 		select {
@@ -165,89 +179,94 @@ func (s *Stream) readStream(dataCh chan StreamResponse, stream *gousb.ReadStream
 			return
 		default:
 			// n, err = bufferedReader.Read(recvBuffer)
-			n, err = io.ReadFull(stream, recvBuffer)
+			n, err = io.ReadFull(stream, reqBuffer)
 			// fmt.Println(err)
 			if err != nil {
 				dataCh <- StreamResponse{Timestamp: time.Now(), Error: err}
 				continue
-			} else if n != len(recvBuffer) {
-				fmt.Printf("Failed to read complete response: %d != %d\n", n, len(recvBuffer))
+			} else if n != len(reqBuffer) {
+				fmt.Printf("Failed to read complete response: %d != %d\n", n, len(reqBuffer))
 				// fmt.Println(recvBuffer)
 				dataCh <- StreamResponse{Timestamp: time.Now(), Error: ErrResponseTooShort}
 				continue
 			}
-			// fmt.Println(recvBuffer)
+			// fmt.Println(reqBuffer)
 
-			checksumTotal16, err = extendedChecksum16(recvBuffer)
-			if err != nil {
-				dataCh <- StreamResponse{Timestamp: time.Now(), Error: err}
-				continue
-			} else if byte((checksumTotal16>>8)&0xff) != recvBuffer[5] {
-				dataCh <- StreamResponse{Timestamp: time.Now(), Error: ErrInvalidChecksumResponse}
-				continue
-			} else if byte(checksumTotal16&0xff) != recvBuffer[4] {
-				dataCh <- StreamResponse{Timestamp: time.Now(), Error: ErrInvalidChecksumResponse}
-				continue
-			}
+			for i := 0; i < packetsPerRequest; i++ {
+				offset := packestSize * i
+				recvBuffer = reqBuffer[offset : offset+packestSize]
 
-			checksumTotal8, err = extendedChecksum8(recvBuffer)
-			if err != nil {
-				dataCh <- StreamResponse{Error: err}
-				continue
-			} else if checksumTotal8 != recvBuffer[0] {
-				dataCh <- StreamResponse{Timestamp: time.Now(), Error: ErrInvalidChecksumResponse}
-				continue
-			}
-
-			if recvBuffer[1] != byte(0xF9) {
-				dataCh <- StreamResponse{Timestamp: time.Now(), Error: ErrInvalidResponseHeader}
-				continue
-			} else if recvBuffer[2] != byte(4+s.config.SamplesPerPacket) {
-				dataCh <- StreamResponse{Timestamp: time.Now(), Error: ErrInvalidResponseHeader}
-				continue
-			} else if recvBuffer[3] != byte(0xC0) {
-				dataCh <- StreamResponse{Timestamp: time.Now(), Error: ErrInvalidResponseHeader}
-				continue
-			}
-
-			if recvBuffer[11] == byte(59) {
-				// Data overflow
-			} else if recvBuffer[11] == byte(60) {
-				// Auto-recovery packet
-				// recvBuffer[6] + recvBuffer[7]*256 scans dropped
-			} else if recvBuffer[11] != 0 {
-				dataCh <- StreamResponse{Timestamp: time.Now(), Error: ErrLabJackErrorCode{int(recvBuffer[11])}}
-				continue
-			}
-
-			// Packet ID
-			// packetID = recvBuffer[10]
-
-			// Backlog
-			// Channel data
-			data := make([]ChannelData, samplesPerPacket)
-			for i := 12; i < bytelimit; i += 2 {
-				data[(i-12)/2] = ChannelData{
-					ChannelIndex:  channelIndex,
-					ScanNumber:    scanNumber,
-					PacketNumber:  packetNumber,
-					Raw:           uint16(recvBuffer[i]) + uint16(recvBuffer[i+1])*256,
-					calInfo:       s.device.calibration,
-					config:        s.config,
-					channelConfig: s.config.Channels[channelIndex],
+				checksumTotal16, err = extendedChecksum16(recvBuffer)
+				if err != nil {
+					dataCh <- StreamResponse{Timestamp: time.Now(), Error: err}
+					continue
+				} else if byte((checksumTotal16>>8)&0xff) != recvBuffer[5] {
+					dataCh <- StreamResponse{Timestamp: time.Now(), Error: ErrInvalidChecksumResponse}
+					continue
+				} else if byte(checksumTotal16&0xff) != recvBuffer[4] {
+					dataCh <- StreamResponse{Timestamp: time.Now(), Error: ErrInvalidChecksumResponse}
+					continue
 				}
-				channelIndex++
-				if channelIndex >= numChannels {
-					channelIndex = 0
-					scanNumber++
-				}
-			}
 
-			if packetNumber >= 255 {
-				packetNumber = 0
+				checksumTotal8, err = extendedChecksum8(recvBuffer)
+				if err != nil {
+					dataCh <- StreamResponse{Error: err}
+					continue
+				} else if checksumTotal8 != recvBuffer[0] {
+					dataCh <- StreamResponse{Timestamp: time.Now(), Error: ErrInvalidChecksumResponse}
+					continue
+				}
+
+				if recvBuffer[1] != byte(0xF9) {
+					dataCh <- StreamResponse{Timestamp: time.Now(), Error: ErrInvalidResponseHeader}
+					continue
+				} else if recvBuffer[2] != byte(4+s.config.SamplesPerPacket) {
+					dataCh <- StreamResponse{Timestamp: time.Now(), Error: ErrInvalidResponseHeader}
+					continue
+				} else if recvBuffer[3] != byte(0xC0) {
+					dataCh <- StreamResponse{Timestamp: time.Now(), Error: ErrInvalidResponseHeader}
+					continue
+				}
+
+				if recvBuffer[11] == byte(59) {
+					// Data overflow
+				} else if recvBuffer[11] == byte(60) {
+					// Auto-recovery packet
+					// recvBuffer[6] + recvBuffer[7]*256 scans dropped
+				} else if recvBuffer[11] != 0 {
+					dataCh <- StreamResponse{Timestamp: time.Now(), Error: ErrLabJackErrorCode{int(recvBuffer[11])}}
+					continue
+				}
+
+				// Packet ID
+				// packetID = recvBuffer[10]
+
+				// Backlog
+				// Channel data
+				data := make([]*ChannelData, samplesPerPacket)
+				for i := 12; i < bytelimit; i += 2 {
+					data[(i-12)/2] = &ChannelData{
+						ChannelIndex:  channelIndex,
+						ScanNumber:    scanNumber,
+						PacketNumber:  packetNumber,
+						Raw:           uint16(recvBuffer[i]) + uint16(recvBuffer[i+1])*256,
+						calInfo:       s.device.calibration,
+						config:        s.config,
+						channelConfig: s.config.Channels[channelIndex],
+					}
+					channelIndex++
+					if channelIndex >= numChannels {
+						channelIndex = 0
+						scanNumber++
+					}
+				}
+
+				if packetNumber >= 255 {
+					packetNumber = 0
+				}
+				packetNumber++
+				dataCh <- StreamResponse{Timestamp: time.Now(), Data: data, PacketNumber: packetNumber}
 			}
-			packetNumber++
-			dataCh <- StreamResponse{Timestamp: time.Now(), Data: data, PacketNumber: packetNumber}
 		}
 	}
 }

@@ -113,7 +113,7 @@ func Test_StreamConfig(t *testing.T) {
 
 	fmt.Println(dev.DeviceDesc())
 
-	_, err = dev.NewStream(u6.StreamConfig{1, 25, 0, u6.ScanConfig{u6.ClockSpeed4Mhz, u6.ClockDivisionOff}, []u6.ChannelConfig{{1, u6.GainIndex1, u6.DifferentialInputDisabled}}})
+	_, err = dev.NewStream(&u6.StreamConfig{1, 25, 0, 1000, &u6.ScanConfig{u6.ClockSpeed4Mhz, u6.ClockDivisionOff, 0}, []u6.ChannelConfig{{1, u6.GainIndex1, u6.DifferentialInputDisabled}}})
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -135,7 +135,7 @@ func Test_StreamData(t *testing.T) {
 
 	fmt.Println(dev.DeviceDesc())
 
-	stream, err := dev.NewStream(u6.StreamConfig{1, 25, 0, u6.ScanConfig{u6.ClockSpeed4Mhz, u6.ClockDivisionOff}, []u6.ChannelConfig{{12, u6.GainIndex10, u6.DifferentialInputDisabled}}})
+	stream, err := dev.NewStream(&u6.StreamConfig{1, 25, 0, 1000, &u6.ScanConfig{u6.ClockSpeed4Mhz, u6.ClockDivisionOff, 0}, []u6.ChannelConfig{{12, u6.GainIndex10, u6.DifferentialInputDisabled}}})
 	if err != nil {
 		log.Fatal(err)
 	}

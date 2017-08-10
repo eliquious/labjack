@@ -1,0 +1,4 @@
+package: github.com/eliquious/labjack/u6
+import:
+- package: github.com/eliquious/labjack
+- package: github.com/google/gousb

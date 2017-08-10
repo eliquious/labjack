@@ -91,21 +91,21 @@ func setChecksum(bytes []uint8) error {
 }
 
 func setChecksum16(bytes []uint8) {
-	var total uint8
+	var total int
 	for i := 6; i < len(bytes); i++ {
-		total += bytes[i] & 0xFF
+		total += int(bytes[i] & 0xFF)
 	}
-	bytes[4] = total & 0xFF
-	bytes[5] = (total >> 8) & 0xFF
+	bytes[4] = byte(total & 0xFF)
+	bytes[5] = byte((total >> 8) & 0xFF)
 }
 
 func setChecksum8(bytes []uint8, num int) {
-	var total uint8
+	var total int
 	for i := 1; i < num; i++ {
-		total += bytes[i] & 0xFF
+		total += int(bytes[i] & 0xFF)
 	}
-	bytes[0] = total&0xFF + ((total >> 8) & 0xFF)
-	bytes[0] = bytes[0]&0xFF + ((bytes[0] >> 8) & 0xFF) + 1
+	bytes[0] = byte(total&0xFF + ((total >> 8) & 0xFF))
+	bytes[0] = bytes[0]&0xFF + ((bytes[0] >> 8) & 0xFF)
 }
 
 func uint8ArrayToFloat64(buffer []uint8, startIndex int) float64 {
