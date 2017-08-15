@@ -73,10 +73,6 @@ type StreamResponse struct {
 	Error        error
 }
 
-// func (s StreamResponse) String() string {
-// 	return fmt.Sprintf("<u6.>", s.PacketNumber, s.Data)
-// }
-
 type ChannelData struct {
 	Raw           uint16
 	ChannelIndex  int
@@ -145,8 +141,6 @@ func (s *Stream) Start() (chan StreamResponse, error) {
 		return dataCh, err
 	}
 	s.closeInf = done
-
-	// fmt.Println("Reading stream")
 	go s.readStream(dataCh, stream)
 	return dataCh, nil
 }
@@ -156,7 +150,6 @@ func (s *Stream) readStream(dataCh chan StreamResponse, stream *gousb.ReadStream
 
 	var n int
 	var err error
-	// var packetID byte
 	var scanNumber int
 	var channelIndex int
 	var packetNumber int
@@ -170,7 +163,6 @@ func (s *Stream) readStream(dataCh chan StreamResponse, stream *gousb.ReadStream
 	var recvBuffer []byte
 	packestSize := int(14 + s.config.SamplesPerPacket*2)
 	reqBuffer := make([]byte, packestSize*packetsPerRequest)
-	// bufferedReader := bufio.NewReader(stream)
 	for {
 		select {
 		case <-s.stopCh:
@@ -178,19 +170,15 @@ func (s *Stream) readStream(dataCh chan StreamResponse, stream *gousb.ReadStream
 			s.stop()
 			return
 		default:
-			// n, err = bufferedReader.Read(recvBuffer)
 			n, err = io.ReadFull(stream, reqBuffer)
-			// fmt.Println(err)
 			if err != nil {
 				dataCh <- StreamResponse{Timestamp: time.Now(), Error: err}
 				continue
 			} else if n != len(reqBuffer) {
 				fmt.Printf("Failed to read complete response: %d != %d\n", n, len(reqBuffer))
-				// fmt.Println(recvBuffer)
 				dataCh <- StreamResponse{Timestamp: time.Now(), Error: ErrResponseTooShort}
 				continue
 			}
-			// fmt.Println(reqBuffer)
 
 			for i := 0; i < packetsPerRequest; i++ {
 				offset := packestSize * i
@@ -313,7 +301,6 @@ func (s *Stream) start() error {
 	} else if n != len(recvBuffer) {
 		return fmt.Errorf("Full response was not recieved from device: %d != %d", n, len(recvBuffer))
 	}
-	// fmt.Printf("Recv buffer: %v\n", recvBuffer)
 
 	if normalChecksum8(recvBuffer[1:]) != recvBuffer[0] {
 		return ErrInvalidChecksumResponse

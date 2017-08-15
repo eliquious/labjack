@@ -10,30 +10,30 @@ import (
 )
 
 // OpenUSBConnection opens the USB connection a LabJack U6.
-func OpenUSBConnection(usbctx *gousb.Context) (U6, error) {
+func OpenUSBConnection(usbctx *gousb.Context) (*U6, error) {
 	if usbctx == nil {
-		return emptyU6, ErrInvalidContext
+		return &emptyU6, ErrInvalidContext
 	}
 
 	// Open any device with a given VID/PID using a convenience function.
 	dev, err := usbctx.OpenDeviceWithVIDPID(labjack.LabJackVendorID, labjack.U6ProductID)
 	if err != nil {
-		return emptyU6, ErrLibUSB{"Could not open a device", err}
+		return &emptyU6, ErrLibUSB{"Could not open a device", err}
 	}
 	if err := dev.Reset(); err != nil {
-		return emptyU6, err
+		return &emptyU6, err
 	}
 	if err := dev.SetAutoDetach(true); err != nil {
-		return emptyU6, err
+		return &emptyU6, err
 	}
 
-	ljdev := U6{dev, DeviceDesc{}, DefaultCalibrationInfo}
+	ljdev := &U6{dev, DeviceDesc{}, DefaultCalibrationInfo}
 	if err = ljdev.initConnection(); err != nil {
-		return emptyU6, err
+		return &emptyU6, err
 	}
 
 	if err = ljdev.getCalibrationInfo(); err != nil {
-		return emptyU6, err
+		return &emptyU6, err
 	}
 	return ljdev, nil
 }
@@ -416,7 +416,7 @@ func (u *U6) Feedback(cmds ...FeedbackCommand) error {
 
 // NewStream creates a new data stream
 func (u *U6) NewStream(config *StreamConfig) (*Stream, error) {
-	stream := &Stream{u, config, make(chan struct{}), func() {}}
+	stream := &Stream{u, config, make(chan struct{}, 1), func() {}}
 	if config.SamplesPerPacket < 1 || config.SamplesPerPacket > 25 {
 		return stream, errors.New("Invalid samples per packet")
 	} else if config.ResolutionIndex < 1 || config.ResolutionIndex > 8 {
